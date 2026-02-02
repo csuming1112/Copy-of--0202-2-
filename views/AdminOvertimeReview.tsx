@@ -113,10 +113,12 @@ export default function AdminOvertimeReview() {
         setOvertimeChecks(allChecks || []);
         
         // 預先計算並填入 Snapshot 欄位
+        // 邏輯：檢查 overtime_check 資料表，加總該月份該人員的 Verified 總時數
         const initialBalances: Record<string, number> = {};
         allUsers.forEach(u => {
             const userChecks = allChecks.filter(c => c.userId === u.id && c.isVerified);
             const sum = parseFloat(userChecks.reduce((acc, c) => acc + (c.actualDuration || 0), 0).toFixed(2));
+            // 只有當確實有核定資料時才覆蓋，否則保留可能的手動調整值或保持 undefined (讓下方 render 邏輯使用 record.actualHours)
             if (userChecks.length > 0) {
                 initialBalances[u.id] = sum;
             }
@@ -328,11 +330,12 @@ export default function AdminOvertimeReview() {
               };
               if (check.isVerified) selectedIds.add(r.id);
           } else {
+              // 依需求：初始值先代 0
               edits[r.id] = { 
                   startDate: r.startDate, endDate: r.endDate, 
                   startTime: isFullDay ? '00:00' : (r.startTime || '18:00'),
                   endTime: isFullDay ? '00:00' : (r.endTime || '20:00'),
-                  duration: isFullDay ? 8 : calculateHours(r)
+                  duration: 0 
               };
           }
       });
@@ -395,21 +398,27 @@ export default function AdminOvertimeReview() {
           await Promise.all(promises);
           // ----------------------------------------------------
 
+          // --- 同步核定時數至 Snapshot (BalanceInputs) ---
           const newBalanceInputs = { ...balanceInputs };
           const newModifiedUsers = new Set(modifiedUsers);
           const userTotals: Record<string, number> = {};
 
+          // 初始化受影響使用者的總和為 0 (避免累加錯誤)
           checksToSave.forEach(c => {
               if (userTotals[c.userId] === undefined) userTotals[c.userId] = 0;
           });
 
+          // 重新計算總和 (只加總 Verified 為 true 的)
           checksToSave.forEach(c => {
-              userTotals[c.userId] += Number(c.actualDuration || 0);
+              if (c.isVerified) {
+                  userTotals[c.userId] += Number(c.actualDuration || 0);
+              }
           });
 
+          // 更新 State
           Object.entries(userTotals).forEach(([uid, total]) => {
               newBalanceInputs[uid] = parseFloat(total.toFixed(2));
-              newModifiedUsers.add(uid); 
+              newModifiedUsers.add(uid); // 標記為有變動，讓批次結算按鈕生效
           });
 
           setBalanceInputs(newBalanceInputs);

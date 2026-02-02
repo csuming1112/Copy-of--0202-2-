@@ -200,7 +200,7 @@ class SupabaseDB {
       try {
           // 1. 取得該用戶所有相關資料
           const [allReqs, allChecks, allRecords] = await Promise.all([
-              this.getRequests(), // 這裡可以優化成只抓該 User，但目前 mockDb 架構是全抓
+              this.getRequests(), 
               this.getUserOvertimeChecks(userId),
               this.getOvertimeRecords()
           ]);
@@ -247,24 +247,18 @@ class SupabaseDB {
                       return acc + hours;
                   }, 0);
 
-              // 加班時數 (Overtime) - 優先使用 Check 表的核定數值
+              // 加班時數 (Overtime) - 優先使用 Check 表的核定數值 (Actual)
+              // 只有當 Check 存在且 isVerified = true 時才計入
               const overtimeHours = monthReqs
                   .filter(r => r.type === LeaveType.OVERTIME)
                   .reduce((acc, r) => {
                       const check = allChecks.find(c => c.requestId === r.id);
-                      if (check && check.isVerified) return acc + (check.actualDuration || 0);
-                      
-                      // 若無核定，使用申請時數 (Fallback)
-                      let hours = 0;
-                      if (!r.isPartialDay) {
-                          const s = new Date(r.startDate), e = new Date(r.endDate);
-                          hours = (Math.ceil(Math.abs(e.getTime() - s.getTime()) / 86400000) + 1) * 8;
-                      } else if (r.startTime && r.endTime) {
-                          const [sh, sm] = r.startTime.split(':').map(Number);
-                          const [eh, em] = r.endTime.split(':').map(Number);
-                          hours = Math.max(0, ((eh * 60 + em) - (sh * 60 + sm)) / 60);
-                      } else { hours = 4; }
-                      return acc + hours;
+                      if (check && check.isVerified) {
+                          return acc + (check.actualDuration || 0);
+                      }
+                      // 若無核定，預設為 0 (嚴格模式) 或可改為使用申請時數
+                      // 根據需求 3 & 4，明細預設0，且只有勾選才算，故這裡未核定應視為 0
+                      return acc + 0; 
                   }, 0);
 
               // 取得既有的結算紀錄 (保留已發放 Paid Hours)
@@ -296,7 +290,7 @@ class SupabaseDB {
                   year: y,
                   month: m,
                   appliedHours: appliedHours,
-                  actualHours: actualHours, // 自動帶入核定時數
+                  actualHours: actualHours, // 自動帶入核定總和
                   paidHours: paidHours,
                   remainingHours: remaining,
                   settledAt: new Date().toISOString(),
